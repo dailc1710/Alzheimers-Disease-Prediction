@@ -229,7 +229,7 @@ def benchmark_summary_table(metadata: dict) -> pd.DataFrame:
 
 
 def threshold_scenario_table(metadata: dict, selected_threshold: float) -> pd.DataFrame:
-    """Compare recall-oriented, requested, selected, and default thresholds."""
+    """Compare validation-only threshold scenarios with an explicit cohort label."""
 
     threshold_selection = metadata.get("threshold_selection", {})
     sweep = pd.DataFrame(threshold_selection.get("table", []))
@@ -247,6 +247,15 @@ def threshold_scenario_table(metadata: dict, selected_threshold: float) -> pd.Da
     for column in required:
         sweep[column] = pd.to_numeric(sweep[column], errors="coerce")
     sweep = sweep.dropna(subset=["threshold"])
+    count_columns = ["true_negatives", "false_positives", "false_negatives", "true_positives"]
+    validation_rows = None
+    if all(column in sweep.columns for column in count_columns):
+        counts = pd.to_numeric(sweep.iloc[0][count_columns], errors="coerce")
+        if counts.notna().all():
+            validation_rows = int(counts.sum())
+    cohort_label = (
+        f"Validation (n={validation_rows:,})" if validation_rows is not None else "Validation"
+    )
 
     def nearest_sweep_row(threshold: float) -> dict:
         index = (sweep["threshold"] - threshold).abs().idxmin()
@@ -270,6 +279,7 @@ def threshold_scenario_table(metadata: dict, selected_threshold: float) -> pd.Da
     for scenario, values in scenarios:
         rows.append(
             {
+                "Cohort": cohort_label,
                 "Scenario": scenario,
                 "Threshold": values.get("threshold"),
                 "Precision": values.get("precision"),
@@ -285,7 +295,19 @@ def threshold_scenario_table(metadata: dict, selected_threshold: float) -> pd.Da
         view[column] = pd.to_numeric(view[column], errors="coerce").round(3)
     for column in ["False negatives", "False positives"]:
         view[column] = pd.to_numeric(view[column], errors="coerce").astype("Int64")
-    return view
+    return view[
+        [
+            "Cohort",
+            "Scenario",
+            "Threshold",
+            "Precision",
+            "Recall",
+            "Specificity",
+            "F2",
+            "False negatives",
+            "False positives",
+        ]
+    ]
 
 
 def selected_feature_evidence_table(metadata: dict, selected_features: list[str]) -> pd.DataFrame:

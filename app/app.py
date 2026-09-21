@@ -4763,7 +4763,47 @@ def _model_info_tab(payload: dict, metadata: dict) -> None:
                 )
             )
         else:
-            st.dataframe(threshold_table, width="stretch", hide_index=True)
+            validation_rows = metadata.get("split_sizes", {}).get("validation")
+            validation_label = (
+                f"validation (n={int(validation_rows):,})"
+                if validation_rows is not None
+                else "validation"
+            )
+            st.caption(
+                _t(
+                    f"Every row in this table is calculated only on {validation_label}. "
+                    "These values are used to select the threshold and must not be compared "
+                    "row-for-row with the locked-test counts below.",
+                    f"Tất cả dòng trong bảng này chỉ được tính trên tập {validation_label}. "
+                    "Các số liệu này dùng để chọn ngưỡng, không được so trực tiếp từng dòng "
+                    "với số đếm của tập test khóa ở phía dưới.",
+                )
+            )
+            display_threshold_table = threshold_table.copy()
+            display_threshold_table["Scenario"] = display_threshold_table["Scenario"].replace(
+                {
+                    "Recall-priority candidate": _t(
+                        "Recall-priority candidate", "Ứng viên ưu tiên Recall"
+                    ),
+                    "Requested ≈0.20 example": _t(
+                        "Requested ≈0.20 example", "Ví dụ ngưỡng ≈0,20"
+                    ),
+                    "Selected by validation F2": _t(
+                        "Selected by validation F2", "Được chọn theo F2 validation"
+                    ),
+                    "Default 0.50": _t("Default 0.50", "Mặc định 0,50"),
+                }
+            )
+            display_threshold_table = display_threshold_table.rename(
+                columns={
+                    "Cohort": _t("Cohort", "Tập dữ liệu"),
+                    "Scenario": _t("Scenario", "Kịch bản"),
+                    "Threshold": _t("Threshold", "Ngưỡng"),
+                    "False negatives": _t("False negatives", "Bỏ sót (FN)"),
+                    "False positives": _t("False positives", "Báo động giả (FP)"),
+                }
+            )
+            st.dataframe(display_threshold_table, width="stretch", hide_index=True)
             requested_row = threshold_table[
                 threshold_table["Scenario"].eq("Requested ≈0.20 example")
             ]
@@ -4811,7 +4851,49 @@ def _render_threshold_operating_point(metadata: dict) -> None:
             "Artifact đang dùng không lưu số đếm ma trận nhầm lẫn. Biểu đồ này là bằng chứng báo cáo V3, không phải kết quả của artifact hiện tại.",
         ))
     if operating_counts:
+        tn, fp, fn, tp = operating_counts
         operating_metrics = _confusion_operating_metrics(operating_counts)
+        precision = operating_metrics["PPV / Precision"]
+        recall = operating_metrics["Sensitivity / Recall"]
+        specificity = operating_metrics["Specificity"]
+        f2 = (
+            5 * precision * recall / (4 * precision + recall)
+            if 4 * precision + recall
+            else 0.0
+        )
+        test_rows = tn + fp + fn + tp
+        threshold = float(metadata.get("threshold", REPORT_V3_MODEL_REFERENCE["threshold"]))
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        _t("Cohort", "Tập dữ liệu"): _t(
+                            f"Locked test (n={test_rows:,})",
+                            f"Test khóa (n={test_rows:,})",
+                        ),
+                        _t("Threshold", "Ngưỡng"): round(threshold, 3),
+                        "TN": tn,
+                        "FP": fp,
+                        "FN": fn,
+                        "TP": tp,
+                        "Precision": round(precision, 3),
+                        "Recall": round(recall, 3),
+                        "Specificity": round(specificity, 3),
+                        "F2": round(f2, 3),
+                    }
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.caption(
+            _t(
+                "This is a one-time evaluation on the locked test cohort after the threshold "
+                "was fixed on validation; it is not used to choose or retune the threshold.",
+                "Đây là lần đánh giá duy nhất trên tập test khóa sau khi ngưỡng đã được cố định "
+                "từ validation; số liệu này không dùng để chọn hoặc chỉnh lại ngưỡng.",
+            )
+        )
         for column, (label, value) in zip(st.columns(4), operating_metrics.items()):
             column.metric(label, f"{value * 100:.1f}%")
         st.caption(_t(

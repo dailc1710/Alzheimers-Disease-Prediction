@@ -240,6 +240,7 @@ class AppSmokeTests(unittest.TestCase):
         )
 
     def test_optimization_tabs_keep_evidence_in_its_own_tab(self):
+        app = importlib.import_module("app")
         app_test = AppTest.from_file("app.py").run(timeout=60)
         app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
         app_test.radio(key="model_information_view").set_value("Model overview").run(timeout=60)
@@ -255,6 +256,30 @@ class AppSmokeTests(unittest.TestCase):
         self.assertNotIn("Quá trình lựa chọn", tab_text[2])
         self.assertNotIn("Điểm vận hành trên test khóa", tab_text[2])
         self.assertIn("Điểm vận hành trên test khóa", tab_text[3])
+        threshold_captions = " ".join(str(item.value) for item in tabs[3].caption)
+        self.assertIn(
+            "Tất cả dòng trong bảng này chỉ được tính trên tập validation",
+            threshold_captions,
+        )
+
+        _, metadata = app.load_artifacts(app.DEFAULT_ARTIFACTS_DIR)
+        threshold_table = app._threshold_scenario_table(metadata, metadata["threshold"])
+        self.assertEqual({"Validation (n=314)"}, set(threshold_table["Cohort"]))
+        selected = threshold_table.loc[
+            threshold_table["Scenario"].eq("Selected by validation F2")
+        ].iloc[0]
+        self.assertEqual(16, int(selected["False negatives"]))
+        self.assertEqual(6, int(selected["False positives"]))
+        locked_test_tables = [
+            item.value
+            for item in tabs[3].dataframe
+            if {"TN", "FP", "FN", "TP"}.issubset(item.value.columns)
+        ]
+        self.assertEqual(1, len(locked_test_tables))
+        self.assertEqual(
+            {"TN": 242, "FP": 12, "FN": 13, "TP": 126},
+            locked_test_tables[0].iloc[0][["TN", "FP", "FN", "TP"]].to_dict(),
+        )
 
     def test_project_workflow_precedes_model_overview_and_shows_nine_steps(self):
         app_test = AppTest.from_file("app.py").run(timeout=60)
