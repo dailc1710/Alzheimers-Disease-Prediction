@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.py[cod]
+.git/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.github/
+docs/
+tests/
+artifacts/versions/
+artifacts/backups/
+artifacts/eda/
+artifacts/audit/
+archive/
+*.tmp
+*.rollback

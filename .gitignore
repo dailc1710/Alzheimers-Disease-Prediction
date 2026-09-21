@@ -1,0 +1,17 @@
+# Workspace-local caches and review outputs
+.codex_tmp/
+.docx_review/
+.ruff_cache/
+
+# Python caches created by root-level launchers
+__pycache__/
+*.py[cod]
+
+# Generated reports/packages are kept locally, not as source code
+deliverables/
+
+# Local datasets and derived model artifacts are not published
+alzheimers_disease_data.csv
+app/data/*.csv
+app/artifacts/*.joblib
+app/artifacts/*.json

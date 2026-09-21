@@ -1,0 +1,35 @@
+# Python and test caches
+.venv/
+.testvenv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Runtime uploads, temporary files, and logs
+*.tmp
+*.rollback
+uploads/
+logs/
+
+# Generated artifact history; keep the active artifact under version control
+artifacts/versions/
+artifacts/backups/
+artifacts/eda/
+artifacts/audit/
+artifacts/.active_artifacts.lock
+
+# Local external-validation data is not checked in
+data/external/*.csv
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
