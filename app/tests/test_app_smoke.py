@@ -65,10 +65,10 @@ class AppSmokeTests(unittest.TestCase):
         navigation = app_test.radio(key="active_section")
         self.assertEqual(
             [
-                "1 · Dự đoán",
-                "2 · Dataset dự án",
-                "3 · Thông tin mô hình",
-                "4 · Cập nhật mô hình (CSV)",
+                "1 · Tổng quan, dữ liệu & EDA",
+                "2 · Xây dựng & đánh giá mô hình",
+                "3 · Dự đoán",
+                "4 · Vận hành & cập nhật",
             ],
             list(navigation.options),
         )
@@ -112,7 +112,7 @@ class AppSmokeTests(unittest.TestCase):
             app_test = AppTest.from_file("app.py").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertTrue(
-            any("CSV Full V3 thuộc tab Dataset dự án" in item.value for item in app_test.error)
+            any("CSV Full V3 thuộc tab Dữ liệu & EDA" in item.value for item in app_test.error)
         )
 
     def test_batch_prediction_accepts_five_feature_csv(self):
@@ -137,6 +137,7 @@ class AppSmokeTests(unittest.TestCase):
     def test_project_dataset_has_its_own_csv_uploader_and_bundled_fallback(self):
         app_test = AppTest.from_file("app.py").run(timeout=60)
         app_test.radio(key="active_section").set_value("Project dataset").run(timeout=60)
+        app_test.radio(key="data_workspace_view").set_value("Dataset and cleaning").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertEqual(1, len(app_test.get("file_uploader")))
         self.assertIn("CSV đầu vào", app_test.get("file_uploader")[0].label)
@@ -169,6 +170,7 @@ class AppSmokeTests(unittest.TestCase):
         app_test = AppTest.from_file("app.py").run(timeout=60)
         with patch("streamlit.file_uploader", return_value=UploadedCSV()):
             app_test.radio(key="active_section").set_value("Project dataset").run(timeout=60)
+            app_test.radio(key="data_workspace_view").set_value("Dataset and cleaning").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertEqual([], list(app_test.error))
         self.assertTrue(any("5 đặc trưng mô hình" in item.value for item in app_test.success))
@@ -186,8 +188,8 @@ class AppSmokeTests(unittest.TestCase):
 
     def test_eda_tab_renders_compact_charts_without_exceptions(self):
         app_test = AppTest.from_file("app.py").run(timeout=60)
-        app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-        app_test.radio(key="model_information_view").set_value("EDA evidence").run(timeout=60)
+        app_test.radio(key="active_section").set_value("Project dataset").run(timeout=60)
+        app_test.radio(key="data_workspace_view").set_value("EDA evidence").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertTrue(any("Pearson" in str(item.value) for item in app_test.markdown))
         self.assertTrue(
@@ -209,7 +211,6 @@ class AppSmokeTests(unittest.TestCase):
         app = importlib.import_module("app")
         app_test = AppTest.from_file("app.py").run(timeout=60)
         app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-        app_test.radio(key="model_information_view").set_value("Model overview").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertTrue(
             any(
@@ -243,7 +244,6 @@ class AppSmokeTests(unittest.TestCase):
         app = importlib.import_module("app")
         app_test = AppTest.from_file("app.py").run(timeout=60)
         app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-        app_test.radio(key="model_information_view").set_value("Model overview").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         tabs = app_test.get("tab")
         self.assertEqual(4, len(tabs))
@@ -281,17 +281,16 @@ class AppSmokeTests(unittest.TestCase):
             locked_test_tables[0].iloc[0][["TN", "FP", "FN", "TP"]].to_dict(),
         )
 
-    def test_project_workflow_precedes_model_overview_and_shows_nine_steps(self):
+    def test_project_workflow_precedes_dataset_views_and_shows_ten_steps(self):
         app_test = AppTest.from_file("app.py").run(timeout=60)
-        app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
+        app_test.radio(key="active_section").set_value("Project dataset").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
-        workflow_navigation = app_test.radio(key="model_information_view")
+        workflow_navigation = app_test.radio(key="data_workspace_view")
         self.assertEqual(
             [
                 "Quy trình tổng quan",
-                "Tổng quan & tối ưu mô hình",
+                "Dataset & làm sạch",
                 "EDA & bằng chứng dữ liệu",
-                "Phản hồi sau khám",
             ],
             list(workflow_navigation.options),
         )
@@ -303,13 +302,14 @@ class AppSmokeTests(unittest.TestCase):
             )
         )
         rendered_markdown = " ".join(str(item.value) for item in app_test.markdown)
-        for step_number in range(1, 10):
+        for step_number in range(1, 11):
             self.assertIn(f"Bước {step_number}", rendered_markdown)
 
     def test_retraining_tab_exposes_feedback_and_csv_sources(self):
         with patch.dict(os.environ, {"ALZHEIMER_AUTH_DISABLED": "1"}, clear=False):
             app_test = AppTest.from_file("app.py").run(timeout=60)
             app_test.radio(key="active_section").set_value("Model update").run(timeout=60)
+            app_test.radio(key="operations_workspace_view").set_value("Retrain / Model update").run(timeout=60)
             self.assertEqual("Labelled five-feature CSV", app_test.radio(key="retraining_source").value)
             uploaders = app_test.get("file_uploader")
             self.assertEqual(1, len(uploaders))
@@ -350,12 +350,38 @@ class AppSmokeTests(unittest.TestCase):
                 status="retained_champion",
                 promoted=False,
                 policy_passed=False,
-                details={"promotion_decision": {"checks": [
-                    {"metric": "pr_auc", "old": 0.9221, "new": 0.9198, "passed": False},
-                    {"metric": "recall", "old": 0.9065, "new": 0.9065, "passed": True},
-                    {"metric": "f2", "old": 0.9078, "new": 0.9065, "passed": False},
-                    {"metric": "brier", "old": 0.0550, "new": 0.0535, "passed": True},
-                ]}},
+                details={
+                    "champion_threshold": 0.425,
+                    "challenger_threshold": 0.380,
+                    "active_threshold_after": 0.425,
+                    "selected_features": [
+                        "MMSE",
+                        "FunctionalAssessment",
+                        "ADL",
+                        "MemoryComplaints",
+                        "BehavioralProblems",
+                    ],
+                    "champion_feature_importance": [
+                        {"feature": "MMSE", "percent": 18.36},
+                        {"feature": "FunctionalAssessment", "percent": 19.39},
+                        {"feature": "ADL", "percent": 18.42},
+                        {"feature": "MemoryComplaints", "percent": 25.90},
+                        {"feature": "BehavioralProblems", "percent": 17.93},
+                    ],
+                    "challenger_feature_importance": [
+                        {"feature": "MMSE", "percent": 19.00},
+                        {"feature": "FunctionalAssessment", "percent": 20.00},
+                        {"feature": "ADL", "percent": 18.00},
+                        {"feature": "MemoryComplaints", "percent": 25.00},
+                        {"feature": "BehavioralProblems", "percent": 18.00},
+                    ],
+                    "promotion_decision": {"checks": [
+                        {"metric": "pr_auc", "old": 0.9221, "new": 0.9198, "passed": False},
+                        {"metric": "recall", "old": 0.9065, "new": 0.9065, "passed": True},
+                        {"metric": "f2", "old": 0.9078, "new": 0.9065, "passed": False},
+                        {"metric": "brier", "old": 0.0550, "new": 0.0535, "passed": True},
+                    ]},
+                },
                 database_path=database,
             )
             with patch.dict(os.environ, {
@@ -364,14 +390,32 @@ class AppSmokeTests(unittest.TestCase):
             }, clear=False):
                 app_test = AppTest.from_file("app.py").run(timeout=60)
                 app_test.radio(key="active_section").set_value("Model update").run(timeout=60)
+                app_test.radio(key="operations_workspace_view").set_value("Retrain / Model update").run(timeout=60)
                 self.assertEqual([], list(app_test.exception))
                 self.assertEqual(run_id, app_test.selectbox(key="retraining_history_selection").value)
                 self.assertTrue(any("So sánh mô hình hiện tại" in str(item.value) for item in app_test.markdown))
+                metric_values = {item.label: item.value for item in app_test.metric}
+                self.assertEqual("0.425", metric_values["Ngưỡng Champion"])
+                self.assertEqual("0.380", metric_values["Ngưỡng Challenger"])
+                self.assertEqual("0.425", metric_values["Ngưỡng active sau phiên"])
+                importance_tables = [
+                    item.value
+                    for item in app_test.dataframe
+                    if {
+                        "Đặc trưng",
+                        "Tỷ trọng Champion",
+                        "Tỷ trọng Challenger",
+                        "Thay đổi",
+                    }.issubset(item.value.columns)
+                ]
+                self.assertEqual(1, len(importance_tables))
+                self.assertEqual(5, len(importance_tables[0]))
+                self.assertEqual("+0.64 điểm %", importance_tables[0].iloc[0]["Thay đổi"])
 
-    def test_feedback_view_renders_inside_model_information(self):
+    def test_feedback_view_renders_inside_operations_workspace(self):
         app_test = AppTest.from_file("app.py").run(timeout=60)
-        app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-        app_test.radio(key="model_information_view").set_value("Clinical feedback").run(timeout=60)
+        app_test.radio(key="active_section").set_value("Model update").run(timeout=60)
+        app_test.radio(key="operations_workspace_view").set_value("Clinical feedback").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertTrue(any("Vòng lặp phản hồi" in item.value for item in app_test.subheader))
 
@@ -396,8 +440,8 @@ class AppSmokeTests(unittest.TestCase):
                 "ALZHEIMER_STATE_DB": str(database),
             }, clear=False):
                 app_test = AppTest.from_file("app.py").run(timeout=60)
-                app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-                app_test.radio(key="model_information_view").set_value("Clinical feedback").run(timeout=60)
+                app_test.radio(key="active_section").set_value("Model update").run(timeout=60)
+                app_test.radio(key="operations_workspace_view").set_value("Clinical feedback").run(timeout=60)
                 self.assertTrue(any("Kết quả AI (chỉ xem)" in item.value for item in app_test.markdown))
                 self.assertTrue(any("Kết luận khám của bác sĩ" in item.value for item in app_test.markdown))
                 result_input = next(item for item in app_test.radio if item.label == "Bác sĩ kết luận sau khám")
@@ -440,8 +484,8 @@ class AppSmokeTests(unittest.TestCase):
                 app_test = AppTest.from_file("app.py")
                 app_test.session_state["auth_user"] = {"username": "viewer.one", "role": "viewer"}
                 app_test.run(timeout=60)
-                app_test.radio(key="active_section").set_value("Model information").run(timeout=60)
-                app_test.radio(key="model_information_view").set_value("Clinical feedback").run(timeout=60)
+                app_test.radio(key="active_section").set_value("Model update").run(timeout=60)
+                app_test.radio(key="operations_workspace_view").set_value("Clinical feedback").run(timeout=60)
                 next(item for item in app_test.radio if item.label == "Bác sĩ kết luận sau khám").set_value(1).run(timeout=60)
                 next(item for item in app_test.checkbox if item.label.startswith("Tôi đã đối chiếu")).set_value(True).run(timeout=60)
                 next(item for item in app_test.button if item.label == "Gửi kết quả để bác sĩ xác minh").click().run(timeout=60)

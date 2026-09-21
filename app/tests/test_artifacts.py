@@ -16,6 +16,7 @@ from ml_pipeline import (
     choose_imbalance_method,
     evaluate_payload,
     evaluate_promotion_policy,
+    feature_importance_percentages,
     paired_bootstrap_difference,
     predict_dataframe,
     prepare_retraining_rows,
@@ -27,6 +28,28 @@ class FakeCalibratedModel:
     def predict_proba(self, features):
         score = np.clip(pd.to_numeric(features["MMSE"], errors="coerce").to_numpy() / 30.0, 0.01, 0.99)
         return np.column_stack([1.0 - score, score])
+
+
+class FakeImportanceEstimator:
+    def __init__(self, values):
+        self.feature_importances_ = np.asarray(values, dtype=float)
+
+
+class FakeCalibratedFold:
+    def __init__(self, values):
+        self.estimator = type(
+            "FakePipeline",
+            (),
+            {"named_steps": {"model": FakeImportanceEstimator(values)}},
+        )()
+
+
+class FakeImportanceModel:
+    def __init__(self):
+        self.calibrated_classifiers_ = [
+            FakeCalibratedFold([1, 2, 3, 4, 5]),
+            FakeCalibratedFold([2, 3, 4, 5, 6]),
+        ]
 
 
 def _payload(threshold=0.5):
@@ -41,6 +64,14 @@ def _payload(threshold=0.5):
 
 
 class ArtifactAndPromotionTests(unittest.TestCase):
+    def test_feature_importance_percentages_average_folds_and_sum_to_100(self):
+        rows = feature_importance_percentages(
+            {"model": FakeImportanceModel(), "features": SELECTED_FEATURES}
+        )
+        self.assertEqual(SELECTED_FEATURES, [row["feature"] for row in rows])
+        self.assertAlmostEqual(100.0, sum(row["percent"] for row in rows))
+        self.assertGreater(rows[-1]["percent"], rows[0]["percent"])
+
     def test_five_feature_retraining_validates_label_and_holds_out_locked_match(self):
         def case(mmse, diagnosis, patient_id=None):
             return {

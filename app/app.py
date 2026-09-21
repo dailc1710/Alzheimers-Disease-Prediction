@@ -42,6 +42,7 @@ from ml_pipeline import (
     _accepted_retraining_rows,
     _locked_test_frame,
     clean_dataset,
+    feature_importance_percentages,
     fit_imputation_statistics,
     load_artifacts,
     monitor_prediction_batch,
@@ -1544,8 +1545,8 @@ def _batch_processing_tab(
         st.subheader(_t("Batch prediction from CSV", "Dự đoán hàng loạt từ CSV"))
         st.caption(
             _t(
-                "Upload one case per row with the five selected model inputs. PatientID is optional; Full V3 files belong in Project dataset.",
-                "Mỗi dòng là một ca với đúng 5 chỉ số mô hình. PatientID có thể thêm; CSV Full V3 dùng ở tab Dataset dự án.",
+                "Upload one case per row with the five selected model inputs. PatientID is optional; Full V3 files belong in Data & EDA.",
+                "Mỗi dòng là một ca với đúng 5 chỉ số mô hình. PatientID có thể thêm; CSV Full V3 dùng ở tab Dữ liệu & EDA.",
             )
         )
         uploaded = st.file_uploader(
@@ -2126,8 +2127,8 @@ def _batch_processing_tab(
     st.subheader(_t("Batch screening result", "Kết quả sàng lọc batch"))
     st.warning(
         _t(
-            "This is an educational screening result, not a medical diagnosis. CSVs with an actual Diagnosis label belong in Model update.",
-            "Đây là kết quả sàng lọc phục vụ học tập, không phải chẩn đoán y khoa. CSV có nhãn Diagnosis thực tế cần đưa vào tab Cập nhật mô hình.",
+            "This is an educational screening result, not a medical diagnosis. CSVs with an actual Diagnosis label belong in Operation & updates > Retraining by CSV.",
+            "Đây là kết quả sàng lọc phục vụ học tập, không phải chẩn đoán y khoa. CSV có nhãn Diagnosis thực tế cần đưa vào Vận hành & cập nhật > Tái huấn luyện bằng CSV.",
         )
     )
     save_batch_for_feedback = False
@@ -2543,8 +2544,120 @@ def _show_retraining_metric_comparison(checks: list[dict]) -> None:
     st.dataframe(display, width="stretch", hide_index=True)
 
 
+def _show_retraining_threshold_comparison(details: dict) -> None:
+    """Explain the champion/challenger thresholds saved for one retraining run."""
+
+    champion = pd.to_numeric(details.get("champion_threshold"), errors="coerce")
+    challenger = pd.to_numeric(details.get("challenger_threshold"), errors="coerce")
+    active_after = pd.to_numeric(details.get("active_threshold_after"), errors="coerce")
+    if pd.isna(challenger):
+        return
+
+    st.markdown("#### " + _t("Thresholds in this retraining run", "Hai ngưỡng trong phiên cập nhật"))
+    threshold_columns = st.columns(3)
+    threshold_columns[0].metric(
+        _t("Champion threshold", "Ngưỡng Champion"),
+        "—" if pd.isna(champion) else f"{float(champion):.3f}",
+    )
+    threshold_columns[1].metric(
+        _t("Challenger threshold", "Ngưỡng Challenger"),
+        f"{float(challenger):.3f}",
+        None if pd.isna(champion) else f"{float(challenger) - float(champion):+.3f}",
+        delta_color="off",
+    )
+    threshold_columns[2].metric(
+        _t("Active after run", "Ngưỡng active sau phiên"),
+        "—" if pd.isna(active_after) else f"{float(active_after):.3f}",
+    )
+    st.caption(
+        _t(
+            "The champion keeps its existing threshold. After the five-feature data is enriched, "
+            "the challenger recalibrates probabilities and selects a new F2 threshold on its new "
+            "validation split. The locked test set is never used to select either threshold.",
+            "Champion giữ ngưỡng hiện tại. Sau khi làm giàu dữ liệu 5 đặc trưng, Challenger hiệu chỉnh "
+            "lại xác suất và chọn ngưỡng F2 mới trên validation mới. Tập test khóa không được dùng để "
+            "chọn bất kỳ ngưỡng nào.",
+        )
+    )
+    selected_features = details.get("selected_features") or []
+    if selected_features:
+        st.caption(
+            _t("Fixed model inputs: ", "5 đặc trưng cố định: ")
+            + " · ".join(str(feature) for feature in selected_features)
+        )
+
+
+def _show_retraining_feature_importance_comparison(details: dict) -> None:
+    """Show how the five global feature-importance shares change in a run."""
+
+    champion = pd.DataFrame(details.get("champion_feature_importance") or [])
+    challenger = pd.DataFrame(details.get("challenger_feature_importance") or [])
+    if champion.empty and challenger.empty:
+        return
+
+    base = pd.DataFrame({"feature": SELECTED_FEATURES})
+    if not champion.empty and {"feature", "percent"}.issubset(champion.columns):
+        base = base.merge(
+            champion[["feature", "percent"]].rename(
+                columns={"percent": "champion_percent"}
+            ),
+            on="feature",
+            how="left",
+        )
+    else:
+        base["champion_percent"] = pd.NA
+    if not challenger.empty and {"feature", "percent"}.issubset(challenger.columns):
+        base = base.merge(
+            challenger[["feature", "percent"]].rename(
+                columns={"percent": "challenger_percent"}
+            ),
+            on="feature",
+            how="left",
+        )
+    else:
+        base["challenger_percent"] = pd.NA
+    base["delta_pp"] = pd.to_numeric(
+        base["challenger_percent"], errors="coerce"
+    ) - pd.to_numeric(base["champion_percent"], errors="coerce")
+
+    st.markdown(
+        "#### "
+        + _t(
+            "Five-feature importance in the retraining cycle",
+            "Tỷ trọng 5 đặc trưng trong chu trình tái huấn luyện",
+        )
+    )
+    display = pd.DataFrame(
+        {
+            _t("Feature", "Đặc trưng"): base["feature"],
+            _t("Champion share", "Tỷ trọng Champion"): base["champion_percent"].map(
+                lambda value: "—" if pd.isna(value) else f"{float(value):.2f}%"
+            ),
+            _t("Challenger share", "Tỷ trọng Challenger"): base[
+                "challenger_percent"
+            ].map(
+                lambda value: _t("Recalculated after run", "Sẽ tính lại sau khi chạy")
+                if pd.isna(value)
+                else f"{float(value):.2f}%"
+            ),
+            _t("Change", "Thay đổi"): base["delta_pp"].map(
+                lambda value: "—" if pd.isna(value) else f"{float(value):+.2f} điểm %"
+            ),
+        }
+    )
+    st.dataframe(display, width="stretch", hide_index=True)
+    st.caption(
+        _t(
+            "Each model's five shares sum to 100%. They describe global XGBoost importance, not a "
+            "patient's Alzheimer probability or a causal medical effect.",
+            "Năm tỷ trọng của mỗi model cộng lại bằng 100%. Đây là mức quan trọng tổng thể trong "
+            "XGBoost, không phải xác suất Alzheimer của một bệnh nhân và không phải quan hệ nhân quả y khoa.",
+        )
+    )
+
+
 def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
-    """Validate labelled five-feature cases and expose the retrain loop."""
+    """Validate labelled five-feature cases and expose the retraining cycle."""
 
     st.subheader(_t("Retrain / Model update", "Huấn luyện lại / Cập nhật mô hình"))
     st.caption(
@@ -2644,6 +2757,8 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
             )
             saved_run = get_retraining_run(selected_run_id)
             if saved_run:
+                _show_retraining_threshold_comparison(saved_run["details"])
+                _show_retraining_feature_importance_comparison(saved_run["details"])
                 saved_checks = saved_run["details"].get("promotion_decision", {}).get("checks", [])
                 _show_retraining_metric_comparison(saved_checks)
     if retrain_source == "Labelled five-feature CSV":
@@ -2826,14 +2941,43 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
             "mọi subgroup chung có thể ước lượng đều được kiểm tra giảm recall/PR-AUC tối đa 0.050.",
         )
     )
+    st.markdown("#### " + _t("Thresholds in the next run", "Hai ngưỡng trong phiên sắp chạy"))
+    threshold_preview = st.columns(2)
+    threshold_preview[0].metric(
+        _t("Champion threshold", "Ngưỡng Champion"),
+        f"{float(metadata.get('threshold', payload.get('threshold', 0.5))):.3f}",
+    )
+    threshold_preview[1].metric(
+        _t("Challenger threshold", "Ngưỡng Challenger"),
+        _t("Recalculated", "Sẽ tính lại"),
+    )
     st.caption(
         _t(
-            "One click starts the full loop: validate → enrich training data → train challenger → compare on the locked cohort → promote only when every policy condition passes → record the session.",
-            "Một lần bấm chạy toàn bộ vòng lặp: kiểm tra → làm giàu dữ liệu → huấn luyện model mới → so sánh trên tập cố định → chỉ cập nhật khi đạt mọi policy → lưu nhật ký phiên.",
+            "The challenger threshold is selected only after enriching the development data with "
+            "the valid new rows, using the same five model inputs plus Diagnosis as the label.",
+            "Ngưỡng Challenger chỉ được chọn sau khi làm giàu dữ liệu development bằng các dòng mới "
+            "hợp lệ, sử dụng đúng 5 đặc trưng của mô hình và Diagnosis làm nhãn.",
+        )
+    )
+    st.caption(
+        _t("Fixed model inputs: ", "5 đặc trưng cố định: ")
+        + " · ".join(SELECTED_FEATURES)
+    )
+    _show_retraining_feature_importance_comparison(
+        {"champion_feature_importance": feature_importance_percentages(payload)}
+    )
+    st.caption(
+        _t(
+            "One click starts one complete retraining cycle: validate → enrich the five-feature data "
+            "→ train and calibrate the challenger → select a new F2 threshold on validation → compare "
+            "on the locked cohort → promote only when every policy condition passes → record the session.",
+            "Một lần bấm chạy một chu trình hoàn chỉnh: kiểm tra → làm giàu dữ liệu 5 đặc trưng → "
+            "huấn luyện và calibration Challenger → chọn ngưỡng F2 mới trên validation → so sánh trên "
+            "tập test khóa → chỉ cập nhật khi đạt mọi policy → lưu nhật ký phiên.",
         )
     )
     run_requested = st.button(
-        _t("Run automatic retraining loop", "Chạy vòng lặp huấn luyện lại tự động"),
+        _t("Run retraining cycle", "Chạy chu trình tái huấn luyện"),
         type="primary",
         key="run_retraining",
         disabled=not authorized,
@@ -2880,6 +3024,17 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
                 "validated_new_rows": retrain.get("validated_new_rows"),
                 "rejected_new_rows": retrain.get("rejected_new_rows"),
                 "locked_test_sha256": retrain.get("locked_test_sha256"),
+                "champion_threshold": retrain.get("champion_threshold"),
+                "challenger_threshold": retrain.get("challenger_threshold"),
+                "active_threshold_after": retrain.get("active_threshold_after"),
+                "threshold_selection_dataset": retrain.get("threshold_selection_dataset"),
+                "selected_features": retrain.get("selected_features", []),
+                "champion_feature_importance": retrain.get(
+                    "champion_feature_importance", []
+                ),
+                "challenger_feature_importance": retrain.get(
+                    "challenger_feature_importance", []
+                ),
             },
         )
         champion_metrics = retrain.get("champion_metrics") or {}
@@ -2890,6 +3045,8 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
                 {"cohort": "locked_test", "model": "Challenger", **challenger_metrics},
             ]
         )
+        _show_retraining_threshold_comparison(retrain)
+        _show_retraining_feature_importance_comparison(retrain)
         _show_retraining_metric_comparison(retrain.get("promotion_decision", {}).get("checks", []))
         st.dataframe(comparison, width="stretch", hide_index=True)
         checks = pd.DataFrame(retrain.get("promotion_decision", {}).get("checks", []))
@@ -2977,7 +3134,14 @@ def _plot_model_feature_ranking(metadata: dict) -> None:
     plt.close(fig)
 
 
-def _plot_benchmark_altair(benchmark: pd.DataFrame, metrics: list[tuple[str, str]], title: str) -> bool:
+def _plot_benchmark_altair(
+    benchmark: pd.DataFrame,
+    metrics: list[tuple[str, str]],
+    title: str,
+    *,
+    compact: bool = False,
+    compact_panel_width: int = 220,
+) -> bool:
     """Render a benchmark chart with native hover tooltips when Altair is available."""
 
     try:
@@ -2998,9 +3162,18 @@ def _plot_benchmark_altair(benchmark: pd.DataFrame, metrics: list[tuple[str, str
         return False
     metric_order = [label for _, label in available]
     model_order = list(benchmark["model"].astype(str))
+    mark_options = {"size": 16} if compact else {}
+    chart_properties = {
+        "title": title,
+        "height": max(145, 22 * len(model_order))
+        if compact
+        else max(180, 34 * len(model_order)),
+    }
+    if compact:
+        chart_properties["width"] = compact_panel_width
     chart = (
         alt.Chart(chart_data)
-        .mark_bar()
+        .mark_bar(**mark_options)
         .encode(
             x=alt.X("Score:Q", title="Score (0–1)", scale=alt.Scale(domain=[0, 1])),
             y=alt.Y("Model:N", title="Candidate model", sort=model_order),
@@ -3016,9 +3189,9 @@ def _plot_benchmark_altair(benchmark: pd.DataFrame, metrics: list[tuple[str, str
                 alt.Tooltip("Score:Q", title="Score", format=".3f"),
             ],
         )
-        .properties(title=title, height=max(180, 34 * len(model_order)))
+        .properties(**chart_properties)
     )
-    st.altair_chart(chart, width="stretch")
+    st.altair_chart(chart, width="content" if compact else "stretch")
     return True
 
 
@@ -3041,6 +3214,7 @@ def _plot_model_benchmark(benchmark: pd.DataFrame) -> None:
         chart_data,
         [("roc_auc_cv", "ROC-AUC CV"), ("pr_auc_cv", "PR-AUC CV"), ("recall", "Recall")],
         "Candidate-model benchmark",
+        compact=True,
     ):
         st.caption("XGBoost is highlighted in gold. The three panels match the V3 report benchmark figure; hover a bar to see the exact score.")
         return
@@ -3084,7 +3258,13 @@ def _plot_benchmark_audit(benchmark: pd.DataFrame) -> None:
     if benchmark.empty or "model" not in benchmark.columns or not available:
         st.info("Full benchmark audit values are not available in this artifact.")
         return
-    if _plot_benchmark_altair(benchmark, list(metric_labels.items()), "Full candidate-model benchmark audit"):
+    if _plot_benchmark_altair(
+        benchmark,
+        list(metric_labels.items()),
+        "Full candidate-model benchmark audit",
+        compact=True,
+        compact_panel_width=190,
+    ):
         st.caption("Gold identifies XGBoost. Hover a bar to see the metric value and model.")
         return
     chart_data = benchmark[["model", *available]].copy()
@@ -5190,13 +5370,13 @@ def _render_model_detail_evidence(payload: dict, metadata: dict) -> None:
 
 
 def _project_workflow_overview() -> None:
-    """Summarize the nine main stages used to build and deploy the V3 model."""
+    """Summarize the report's build stages and operational update cycle."""
 
     st.subheader(_t("Project workflow overview", "Quy trình thực hiện tổng quan"))
     st.caption(
         _t(
-            "The project was completed through the following nine main stages, from data quality review to Streamlit deployment.",
-            "Dưới đây là trình tự 9 bước chính đã thực hiện xuyên suốt đề tài, từ kiểm tra dữ liệu đến triển khai Streamlit.",
+            "The report contains nine model-development stages followed by one operational feedback and retraining cycle.",
+            "Báo cáo gồm 9 bước xây dựng mô hình, sau đó là 1 chu trình vận hành, phản hồi và tái huấn luyện.",
         )
     )
 
@@ -5252,8 +5432,14 @@ def _project_workflow_overview() -> None:
         (
             "Packaging and Streamlit deployment",
             "Đóng gói và triển khai ứng dụng Streamlit",
-            "Package the versioned model artifact and deploy single-case screening, batch CSV prediction, model evidence, clinical feedback, and controlled retraining.",
-            "Đóng gói artifact có phiên bản và triển khai dự đoán 1 ca, dự đoán CSV hàng loạt, bằng chứng mô hình, phản hồi bác sĩ và tái huấn luyện có kiểm soát.",
+            "Package the versioned model artifact and deploy single-case screening, batch CSV prediction, data review, and model evidence in Streamlit.",
+            "Đóng gói artifact có phiên bản và triển khai dự đoán 1 ca, dự đoán CSV hàng loạt, kiểm tra dữ liệu và bằng chứng mô hình trên Streamlit.",
+        ),
+        (
+            "Operation, feedback, and model updates",
+            "Vận hành, phản hồi và cập nhật mô hình",
+            "Store the doctor's ground truth with the original five features, enrich the training data, compare challenger and champion, and promote only a better model.",
+            "Ghép nhãn chuẩn của bác sĩ với 5 đặc trưng ban đầu, làm giàu dữ liệu, so sánh mô hình mới với mô hình hiện tại và chỉ cập nhật khi mô hình mới tốt hơn.",
         ),
     ]
 
@@ -5272,44 +5458,81 @@ def _project_workflow_overview() -> None:
 
     st.info(
         _t(
-            "Open Model overview for detailed evidence and metrics. Operational feedback and retraining continue in the Clinical feedback and Model update areas.",
-            "Mở Tổng quan & tối ưu mô hình để xem bằng chứng và chỉ số chi tiết. Phản hồi sau khám và tái huấn luyện được tiếp tục quản lý tại mục Phản hồi sau khám và tab Cập nhật mô hình.",
+            "Follow Overview, data & EDA for the overview and steps 1–2, Model development & evaluation for steps 3–8, Prediction for step 9, and Operation & updates for step 10.",
+            "Theo tab Tổng quan, dữ liệu & EDA cho phần tổng quan và Bước 1–2; tab Xây dựng & đánh giá cho Bước 3–8; tab Dự đoán cho Bước 9; và tab Vận hành & cập nhật cho Bước 10.",
         )
     )
 
 
-def _model_workspace_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
-    """Keep model evidence and clinical feedback in one workspace."""
+def _data_workspace_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
+    """Group the report overview, data description, cleaning, and EDA."""
 
     view_labels = {
         "Project workflow": "Quy trình tổng quan",
-        "Model overview": "Tổng quan & tối ưu mô hình",
+        "Dataset and cleaning": "Dataset & làm sạch",
         "EDA evidence": "EDA & bằng chứng dữ liệu",
-        "Clinical feedback": "Phản hồi sau khám",
     }
-    if st.session_state.get("model_information_view") not in {None, *view_labels}:
-        st.session_state["model_information_view"] = "Project workflow"
+    if st.session_state.get("data_workspace_view") not in {None, *view_labels}:
+        st.session_state["data_workspace_view"] = "Project workflow"
     selected_view = st.radio(
-        _t("Model-information view", "Nội dung Thông tin mô hình"),
+        _t("Overview and data workspace view", "Nội dung Tổng quan, dữ liệu & EDA"),
         list(view_labels),
         format_func=lambda value: _t(value, view_labels[value]),
         horizontal=True,
-        key="model_information_view",
+        key="data_workspace_view",
     )
     st.caption(
         _t(
-            "The project workflow, model evidence, EDA, and clinical feedback are organized here. Use the separate Model update tab to upload labelled CSV data.",
-            "Quy trình đề tài, bằng chứng mô hình, EDA và phản hồi sau khám được sắp xếp tại đây. Dùng tab Cập nhật mô hình riêng để tải CSV có nhãn thực tế.",
+            "Report sections 2–5: review the overall workflow and dataset, then follow steps 1–2 for cleaning and EDA.",
+            "Mục 2–5 trong báo cáo: xem quy trình tổng quan và bộ dữ liệu, sau đó thực hiện Bước 1–2 là làm sạch và EDA.",
         )
     )
     if selected_view == "Project workflow":
         _project_workflow_overview()
-    elif selected_view == "Model overview":
-        _model_info_tab(payload, metadata)
-    elif selected_view == "EDA evidence":
+    elif selected_view == "Dataset and cleaning":
+        _batch_processing_tab(payload, metadata, user, use_project_dataset=True)
+    else:
         _eda_tab()
-    elif selected_view == "Clinical feedback":
+
+
+def _model_workspace_tab(payload: dict, metadata: dict) -> None:
+    """Show report steps 3–8 without redundant sub-navigation."""
+
+    st.caption(
+        _t(
+            "Report steps 3–8: feature selection, class imbalance, model comparison and tuning, calibration, threshold selection, and locked-test evaluation.",
+            "Bước 3–8 trong báo cáo: chọn đặc trưng, xử lý mất cân bằng, so sánh và tối ưu mô hình, calibration, chọn ngưỡng và đánh giá trên test khóa.",
+        )
+    )
+    _model_info_tab(payload, metadata)
+
+
+def _operations_workspace_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
+    """Group verified clinical feedback and controlled retraining."""
+
+    view_labels = {
+        "Clinical feedback": "Phản hồi sau khám",
+        "Retrain / Model update": "Tái huấn luyện bằng CSV",
+    }
+    if st.session_state.get("operations_workspace_view") not in {None, *view_labels}:
+        st.session_state["operations_workspace_view"] = "Clinical feedback"
+    selected_view = st.radio(
+        _t("Operations view", "Nội dung Vận hành & cập nhật"),
+        list(view_labels),
+        format_func=lambda value: _t(value, view_labels[value]),
+        horizontal=True,
+        key="operations_workspace_view",
+    )
+    st.caption(
+        _t(
+            "Confirm the doctor's ground truth first, then use verified five-feature records or a labelled CSV in the controlled retraining pipeline.",
+            "Xác nhận nhãn chuẩn của bác sĩ trước; sau đó dùng các bản ghi 5 đặc trưng đã xác minh hoặc CSV có nhãn trong quy trình tái huấn luyện có kiểm soát.",
+        )
+    )
+    if selected_view == "Clinical feedback":
         _feedback_tab(user)
+    else:
+        _retrain_tab(payload, metadata, user)
 
 
 def _prediction_workspace_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
@@ -5327,6 +5550,69 @@ def _prediction_workspace_tab(payload: dict, metadata: dict, user: AuthUser) -> 
         _batch_processing_tab(payload, metadata, user)
 
 
+def _sidebar_navigation() -> str:
+    """Render the four report-aligned workspaces in the persistent sidebar."""
+
+    navigation_labels = {
+        "Project dataset": "1 · Tổng quan, dữ liệu & EDA",
+        "Model information": "2 · Xây dựng & đánh giá mô hình",
+        "Prediction": "3 · Dự đoán",
+        "Model update": "4 · Vận hành & cập nhật",
+    }
+    navigation_options = list(navigation_labels)
+    legacy_section = st.session_state.get("active_section", "Prediction")
+    legacy_processing_source = st.session_state.pop("processing_source", None)
+    if legacy_section in {"Single case", "Batch CSV"}:
+        current_section = "Prediction"
+    elif legacy_section == "Prediction" and legacy_processing_source == "Project dataset":
+        current_section = "Project dataset"
+    elif legacy_section == "EDA":
+        current_section = "Project dataset"
+        st.session_state["data_workspace_view"] = "EDA evidence"
+    elif legacy_section == "Retrain / Model update":
+        current_section = "Model update"
+    elif legacy_section == "Model information" and st.session_state.get(
+        "model_information_view"
+    ) == "Project workflow":
+        current_section = "Project dataset"
+        st.session_state["data_workspace_view"] = "Project workflow"
+    elif legacy_section == "Model information" and st.session_state.get(
+        "model_information_view"
+    ) == "Retrain / Model update":
+        current_section = "Model update"
+        st.session_state["operations_workspace_view"] = "Retrain / Model update"
+    elif legacy_section == "Model information" and st.session_state.get(
+        "model_information_view"
+    ) == "EDA evidence":
+        current_section = "Project dataset"
+        st.session_state["data_workspace_view"] = "EDA evidence"
+    elif legacy_section == "Model information" and st.session_state.get(
+        "model_information_view"
+    ) == "Clinical feedback":
+        current_section = "Model update"
+        st.session_state["operations_workspace_view"] = "Clinical feedback"
+    else:
+        current_section = legacy_section
+    if current_section not in navigation_options:
+        current_section = navigation_options[0]
+    if st.session_state.get("active_section") != current_section:
+        st.session_state["active_section"] = current_section
+
+    st.sidebar.markdown(
+        '<div class="sidebar-nav-label">'
+        + _t("Workspace navigation", "Điều hướng")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    return st.sidebar.radio(
+        _t("Main application tabs", "Các tab chính của ứng dụng"),
+        navigation_options,
+        format_func=lambda value: _t(value, navigation_labels[value]),
+        key="active_section",
+        label_visibility="collapsed",
+    )
+
+
 def main() -> None:
     _inject_app_styles()
     _render_sidebar_brand()
@@ -5334,6 +5620,7 @@ def main() -> None:
     user = _require_authentication()
     st.title(_t("Alzheimer's Disease Screening", "Sàng lọc bệnh Alzheimer"))
     _render_account_sidebar(user)
+    active_section = _sidebar_navigation()
     try:
         payload, metadata = get_runtime(_active_artifact_cache_key())
     except Exception as exc:
@@ -5374,55 +5661,14 @@ def main() -> None:
     overview[0].metric(_t("Active model", "Mô hình đang dùng"), "XGBoost")
     overview[1].metric(_t("Model inputs", "Đầu vào mô hình"), len(active_features), _t("selected features", "đặc trưng đã chọn"))
     overview[2].metric(_t("Screening threshold", "Ngưỡng sàng lọc"), f"{active_threshold:.3f}", _t("calibrated score", "điểm đã hiệu chuẩn"))
-    st.markdown(
-        '<div class="section-kicker">'
-        + _t("Application workspace", "Không gian làm việc")
-        + "</div>",
-        unsafe_allow_html=True,
-    )
-
-    navigation_labels = {
-        "Prediction": "1 · Dự đoán",
-        "Project dataset": "2 · Dataset dự án",
-        "Model information": "3 · Thông tin mô hình",
-        "Model update": "4 · Cập nhật mô hình (CSV)",
-    }
-    navigation_options = list(navigation_labels)
-    legacy_section = st.session_state.get("active_section", "Prediction")
-    legacy_processing_source = st.session_state.pop("processing_source", None)
-    if legacy_section in {"Single case", "Batch CSV"}:
-        current_section = "Prediction"
-    elif legacy_section == "Prediction" and legacy_processing_source == "Project dataset":
-        current_section = "Project dataset"
-    elif legacy_section == "EDA":
-        current_section = "Model information"
-    elif legacy_section == "Retrain / Model update":
-        current_section = "Model update"
-    elif legacy_section == "Model information" and st.session_state.get("model_information_view") == "Retrain / Model update":
-        current_section = "Model update"
-    else:
-        current_section = legacy_section
-    if current_section not in navigation_options:
-        current_section = navigation_options[0]
-    if st.session_state.get("active_section") != current_section:
-        st.session_state["active_section"] = current_section
-    active_section = st.radio(
-        _t("Main application tabs", "Các tab chính của ứng dụng"),
-        navigation_options,
-        index=navigation_options.index(current_section),
-        format_func=lambda value: _t(value, navigation_labels[value]),
-        horizontal=True,
-        key="active_section",
-        label_visibility="collapsed",
-    )
     if active_section == "Prediction":
         _prediction_workspace_tab(payload, metadata, user)
     elif active_section == "Project dataset":
-        _batch_processing_tab(payload, metadata, user, use_project_dataset=True)
+        _data_workspace_tab(payload, metadata, user)
     elif active_section == "Model information":
-        _model_workspace_tab(payload, metadata, user)
+        _model_workspace_tab(payload, metadata)
     else:
-        _retrain_tab(payload, metadata, user)
+        _operations_workspace_tab(payload, metadata, user)
 
 
 if __name__ == "__main__":

@@ -1108,6 +1108,50 @@ def _probabilities(model: Any, features: pd.DataFrame) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-scores))
 
 
+def feature_importance_percentages(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return normalized XGBoost importance for the payload's fixed input columns."""
+
+    features = list(payload.get("features") or [])
+    model = payload.get("model")
+    if not features or model is None:
+        return []
+
+    calibrated_estimators = getattr(model, "calibrated_classifiers_", None)
+    candidates = list(calibrated_estimators) if calibrated_estimators else [model]
+    importance_arrays = []
+    for candidate in candidates:
+        estimator = getattr(candidate, "estimator", candidate)
+        if hasattr(estimator, "named_steps"):
+            estimator = estimator.named_steps.get("model", estimator)
+        values = getattr(estimator, "feature_importances_", None)
+        if values is None:
+            continue
+        array = np.asarray(values, dtype=float)
+        if len(array) == len(features) and np.isfinite(array).all():
+            importance_arrays.append(array)
+    if not importance_arrays:
+        return []
+
+    mean_importance = np.mean(importance_arrays, axis=0)
+    total = float(mean_importance.sum())
+    if total <= 0:
+        return []
+    percentages = mean_importance / total * 100.0
+    return [
+        {
+            "feature": feature,
+            "importance": float(importance),
+            "percent": float(percent),
+        }
+        for feature, importance, percent in zip(
+            features,
+            mean_importance,
+            percentages,
+            strict=True,
+        )
+    ]
+
+
 def _metric_values(y_true: Sequence[int], probabilities: Sequence[float], threshold: float = 0.5) -> dict[str, float]:
     s = _import_sklearn()
     actual = np.asarray(y_true)
@@ -2892,6 +2936,23 @@ def retrain_with_new_data(
                     os.replace(restore, accepted_path)
                 raise
             dataset_persisted = True
+        champion_threshold = (
+            float(champion_evaluation["threshold"])
+            if champion_evaluation is not None
+            else None
+        )
+        challenger_threshold = float(challenger_evaluation["threshold"])
+        active_threshold_after = (
+            challenger_threshold
+            if promoted or champion_threshold is None
+            else champion_threshold
+        )
+        champion_feature_importance = (
+            feature_importance_percentages(champion_payload)
+            if champion_payload is not None
+            else []
+        )
+        challenger_feature_importance = feature_importance_percentages(challenger_payload)
         result["retrain"] = {
             "validated_new_rows": int(len(validated_new)),
             "rejected_new_rows": int(len(validation.rejected)),
@@ -2901,6 +2962,13 @@ def retrain_with_new_data(
             "accepted_backup_path": str(accepted_backup_path) if accepted_backup_path else None,
             "old_pr_auc": champion_evaluation["metrics"]["pr_auc"] if champion_evaluation else None,
             "new_pr_auc": challenger_evaluation["metrics"]["pr_auc"],
+            "champion_threshold": champion_threshold,
+            "challenger_threshold": challenger_threshold,
+            "active_threshold_after": active_threshold_after,
+            "threshold_selection_dataset": "validation",
+            "selected_features": list(result["metadata"]["selected_features"]),
+            "champion_feature_importance": champion_feature_importance,
+            "challenger_feature_importance": challenger_feature_importance,
             "promoted": promoted,
             "dataset_persisted": dataset_persisted,
             "dataset_path": str(accepted_path) if dataset_persisted else None,
@@ -2939,6 +3007,7 @@ __all__ = [
     "evaluate_payload",
     "evaluate_promotion_policy",
     "exploratory_summary",
+    "feature_importance_percentages",
     "fit_imputation_statistics",
     "load_artifacts",
     "predict_dataframe",

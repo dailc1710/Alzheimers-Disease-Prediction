@@ -2,13 +2,14 @@
 
 ## Runtime flow
 
-1. `app.py` orchestrates authentication and four main tabs: Prediction,
-   Project dataset, Model information, and Model update. Prediction has two
-   sub-tabs (single case and uploaded batch CSV); Project dataset can inspect
-   and clean another uploaded CSV or fall back to the bundled Full V3 data,
-   then export processed, rejected, and audit CSVs without predicting; Model
-   information holds EDA and clinical feedback; Model update has a labelled-CSV
-   uploader for retraining.
+1. `app.py` orchestrates authentication and four report-aligned workspaces in
+   a persistent vertical sidebar:
+   Overview, data & EDA; Model development & evaluation; Prediction; and
+   Operation & updates. Prediction has two sub-tabs (single case and uploaded
+   batch CSV). Overview, data & EDA covers the project workflow, cleaning, and
+   exploratory evidence. Model development &
+   evaluation covers report steps 3–8. Operation & updates groups verified
+   clinical feedback with the separate labelled-CSV retraining flow.
 2. `ui/` owns reusable presentation helpers, formatting, and the shared stylesheet.
 3. `auth.py` owns password hashing, users, and role checks.
 4. `feedback_store.py` owns case codes, feedback revisions, verified retraining

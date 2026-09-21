@@ -27,7 +27,7 @@ class DataProcessingFlowTests(unittest.TestCase):
     def test_batch_prediction_accepts_only_five_model_inputs_and_optional_id(self):
         validate_five_feature_scoring_columns(SELECTED_FEATURES)
         validate_five_feature_scoring_columns(["PatientID", *SELECTED_FEATURES])
-        with self.assertRaisesRegex(ValueError, "Dataset dự án"):
+        with self.assertRaisesRegex(ValueError, "Dữ liệu & EDA"):
             validate_five_feature_scoring_columns(["PatientID", *ALL_FEATURES])
         with self.assertRaisesRegex(ValueError, "Cập nhật mô hình"):
             validate_five_feature_scoring_columns([*SELECTED_FEATURES, "Diagnosis"])

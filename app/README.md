@@ -92,30 +92,37 @@ streamlit run app.py
 `streamlit_app/app.py` remains a thin deployment wrapper for hosts that expect
 the entry point inside a `streamlit_app` directory.
 
-The app has four main tabs. The **Prediction** tab has two visible sub-tabs:
+The app has four main workspaces in a persistent vertical sidebar, ordered to
+match the report: **Overview, data & EDA**; **Model development & evaluation**;
+**Prediction**; and **Operation & updates**. The **Prediction** workspace has
+two visible sub-tabs:
 
 1. **Single case** accepts the final five features and shows the model class,
    confidence percentage, calibrated Alzheimer score, and a non-identifying
    `CASE-...` follow-up code.
 2. **Batch CSV** accepts the five model features (plus optional `PatientID`),
    screens every eligible row, exports results, and can save uploaded cases for
-   later clinical feedback. Full V3 CSVs belong in **Project dataset**;
-   labelled CSVs belong in **Model update**. `PatientID` is not copied into the
+   later clinical feedback. Full V3 CSVs belong in **Overview, data & EDA**;
+   labelled CSVs belong in **Operation & updates > Retraining by CSV**. `PatientID` is not copied into the
    feedback database.
 
-The separate **Project dataset** tab is the CSV input/output workflow. It
+The **Overview, data & EDA** tab contains the ten-step project overview and
+follows report steps 1–2. Its **Dataset & cleaning** view
 accepts an optional CSV, automatically detects a Full V3 or five-feature
 structure from its headers, validates and cleans rows, and exports the cleaned
 CSV, complete issue log, and removed/rejected rows. With no upload, it uses the
 bundled dataset. This tab does not predict or retrain; the bundled data are not
-an independent external validation set.
+an independent external validation set. The **EDA & data evidence** view contains
+the raw-data audit, descriptive charts, and unsupervised-learning analysis.
 An error-only review table highlights problematic input values in red, actual
 corrected values in green, and fields requiring manual review in amber.
 
-The **Model information** tab contains the model card, EDA evidence, and the
-clinical feedback workflow. The separate **Model update (CSV)** tab accepts
-labelled cases for retraining. The batch-prediction CSV and retraining CSV
-uploaders are intentionally separate; only the latter requires `Diagnosis`.
+The **Model development & evaluation** tab follows report steps 3–8: feature
+selection, class-imbalance treatment, model comparison and tuning, calibration,
+threshold selection, and locked-test evaluation. The **Operation & updates** tab
+contains clinical feedback and controlled retraining. The batch-prediction CSV
+and retraining CSV uploaders are intentionally separate; only the latter requires
+`Diagnosis`.
 
 Authentication is enabled by default. On first launch, the app asks for the
 first administrator account and stores only a salted PBKDF2-SHA256 password
@@ -148,7 +155,7 @@ results are visibly pending, not presented as verified medical conclusions.
 
 ## Retraining
 
-The Streamlit **Model update (CSV)** tab accepts verified feedback or a
+The Streamlit **Operation & updates > Retraining by CSV** view accepts verified feedback or a
 labelled CSV with `MMSE`, `FunctionalAssessment`, `ADL`, `MemoryComplaints`,
 `BehavioralProblems`, and `Diagnosis`. `PatientID` is optional for duplicate
 tracking and is not a model input. It shows validation/rejected-row logs,

@@ -186,9 +186,9 @@ def validate_five_feature_scoring_columns(
         return
     if set(ALL_FEATURES).issubset(available):
         message = (
-            "CSV Full V3 thuộc tab Dataset dự án. Tab Dự đoán hàng loạt chỉ nhận 5 chỉ số mô hình và PatientID tùy chọn."
+            "CSV Full V3 thuộc tab Dữ liệu & EDA. Tab Dự đoán hàng loạt chỉ nhận 5 chỉ số mô hình và PatientID tùy chọn."
             if language == "vi"
-            else "Use the Project dataset tab for Full V3 CSVs. Batch prediction accepts only five model inputs and optional PatientID."
+            else "Use the Data & EDA tab for Full V3 CSVs. Batch prediction accepts only five model inputs and optional PatientID."
         )
     elif TARGET_COLUMN in extra:
         message = (
