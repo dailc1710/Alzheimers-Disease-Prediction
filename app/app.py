@@ -926,6 +926,12 @@ def _eda_quality_tab() -> None:
             }
         else:
             frame, file_info = _read_uploaded_csv(uploaded)
+    except FileNotFoundError:
+        st.info(_t(
+            "The hosted app does not include the private project dataset. Choose Upload CSV to run EDA.",
+            "Bản online không kèm dataset riêng tư của dự án. Hãy chọn Tải CSV lên để chạy EDA.",
+        ))
+        return
     except Exception as exc:
         st.error(str(exc))
         return
@@ -1373,6 +1379,12 @@ def _unsupervised_learning_tab() -> None:
         raw_frame = get_reference_data().copy()
         cleaned_frame, cleaning_report = clean_dataset(raw_frame)
         analysis = _unsupervised_learning_analysis(cleaned_frame)
+    except FileNotFoundError:
+        st.info(_t(
+            "The hosted app does not include the private project dataset, so unsupervised analysis is available only after you upload a CSV.",
+            "Bản online không kèm dataset riêng tư của dự án, nên phân tích không giám sát chỉ dùng được sau khi bạn tải CSV lên.",
+        ))
+        return
     except Exception as exc:
         st.error(str(exc))
         return
@@ -1608,6 +1620,12 @@ def _batch_processing_tab(
                 required_columns=SELECTED_FEATURES if use_project_dataset else template_columns,
                 language=st.session_state.get("language", "vi"),
             )
+    except FileNotFoundError:
+        st.info(_t(
+            "The hosted app does not include the private project dataset. Upload a CSV to use this workflow.",
+            "Bản online không kèm dataset riêng tư của dự án. Hãy tải CSV lên để dùng luồng này.",
+        ))
+        return
     except Exception as exc:
         st.error(str(exc))
         return
@@ -1676,12 +1694,20 @@ def _batch_processing_tab(
 
     raw.insert(0, "_source_row", range(1, len(raw) + 1))
     raw_values = raw.drop(columns=["_source_row"])
-    reference = get_reference_data()
     imputation_statistics = payload.get("imputation_statistics") or metadata.get(
         "imputation_statistics"
     )
+    reference = None
     imputation_source = "active model artifact"
     if not imputation_statistics:
+        try:
+            reference = get_reference_data()
+        except FileNotFoundError:
+            st.info(_t(
+                "This model artifact has no saved imputation statistics, and the private project dataset is not deployed. Retraining locally is required before this CSV can be processed online.",
+                "Artifact này chưa lưu thống kê điền thiếu, còn dataset riêng tư không được triển khai online. Cần huấn luyện lại ở máy local trước khi xử lý CSV trên app.",
+            ))
+            return
         reference_clean, _ = clean_dataset(reference)
         imputation_statistics = fit_imputation_statistics(reference_clean)
         imputation_source = "fallback from cleaned project reference data; retrain artifact to persist it"
@@ -2697,11 +2723,18 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
         ))
         return
 
-    reference = get_reference_data()
-    reference_clean, _ = clean_dataset(reference)
     imputation_statistics = payload.get("imputation_statistics") or metadata.get(
         "imputation_statistics"
     )
+    try:
+        reference = get_reference_data()
+    except FileNotFoundError:
+        st.info(_t(
+            "Retraining requires the private base dataset, which is intentionally not deployed. Run retraining locally or deploy the dataset separately.",
+            "Huấn luyện lại cần dataset gốc riêng tư, hiện không được triển khai online. Hãy huấn luyện lại ở máy local hoặc triển khai dataset riêng.",
+        ))
+        return
+    reference_clean, _ = clean_dataset(reference)
     if not imputation_statistics:
         imputation_statistics = fit_imputation_statistics(reference_clean)
         st.caption(_t(
