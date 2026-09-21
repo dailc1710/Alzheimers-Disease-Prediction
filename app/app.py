@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+import ml_pipeline as ml_pipeline_module
 from auth import (
     AuthUser,
     authenticate,
@@ -42,7 +43,6 @@ from ml_pipeline import (
     _accepted_retraining_rows,
     _locked_test_frame,
     clean_dataset,
-    feature_importance_percentages,
     fit_imputation_statistics,
     load_artifacts,
     monitor_prediction_batch,
@@ -311,6 +311,15 @@ def _active_artifact_cache_key() -> int:
 @st.cache_data(show_spinner=False)
 def get_reference_data() -> pd.DataFrame:
     return pd.read_csv(DEFAULT_DATA_PATH)
+
+
+def _feature_importance_percentages(payload: dict) -> list[dict[str, Any]]:
+    """Use the optional helper without breaking older deployed pipeline modules."""
+
+    helper = getattr(ml_pipeline_module, "feature_importance_percentages", None)
+    if helper is None:
+        return []
+    return helper(payload)
 
 
 def _binary_label(value: int) -> str:
@@ -2964,7 +2973,7 @@ def _retrain_tab(payload: dict, metadata: dict, user: AuthUser) -> None:
         + " · ".join(SELECTED_FEATURES)
     )
     _show_retraining_feature_importance_comparison(
-        {"champion_feature_importance": feature_importance_percentages(payload)}
+        {"champion_feature_importance": _feature_importance_percentages(payload)}
     )
     st.caption(
         _t(
