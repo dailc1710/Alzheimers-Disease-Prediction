@@ -192,8 +192,15 @@ class AppSmokeTests(unittest.TestCase):
         app_test.radio(key="data_workspace_view").set_value("EDA evidence").run(timeout=60)
         self.assertEqual([], list(app_test.exception))
         self.assertTrue(any("Pearson" in str(item.value) for item in app_test.markdown))
-        self.assertTrue(
+        self.assertFalse(
             any("Học không giám sát" in str(item.value) for item in app_test.subheader)
+        )
+        self.assertTrue(
+            any(
+                "Diagnosis" in item.value.columns
+                and "Diagnosis" in item.value.index
+                for item in app_test.dataframe
+            )
         )
 
     def test_unsupervised_analysis_uses_32_features_without_diagnosis(self):

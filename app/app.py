@@ -730,22 +730,98 @@ def _plot_eda_heatmap(correlation: pd.DataFrame) -> None:
     except ImportError:
         st.warning("Heatmap unavailable because matplotlib/seaborn is not installed.")
         return
-    fig, ax = plt.subplots(figsize=(8.8, 6.8), dpi=110)
+    includes_target = TARGET_COLUMN in correlation.columns
+    fig, ax = plt.subplots(figsize=(9.2, 7.2), dpi=110)
+    diverging_palette = sns.diverging_palette(240, 10, as_cmap=True)
     sns.heatmap(
         correlation,
-        cmap="vlag",
+        cmap=diverging_palette,
         center=0,
         vmin=-1,
         vmax=1,
         ax=ax,
         linewidths=0.15,
-        cbar_kws={"shrink": 0.72},
+        cbar_kws={
+            "shrink": 0.72,
+            "label": "Pearson r",
+            "ticks": [-1, -0.5, 0, 0.5, 1],
+        },
     )
-    ax.set_title("Pearson correlation matrix — numeric V3 features", fontsize=11, pad=10)
+    title = (
+        "Pearson correlation matrix — 32 predictors + Diagnosis target"
+        if includes_target
+        else "Pearson correlation matrix — numeric V3 features"
+    )
+    ax.set_title(title, fontsize=11, pad=10)
     ax.tick_params(axis="both", labelsize=7)
     fig.tight_layout()
     _show_eda_figure(fig)
     plt.close(fig)
+
+
+def _target_correlation_table(correlation: pd.DataFrame) -> pd.DataFrame:
+    """Rank the five strongest signed Pearson correlations with Diagnosis."""
+
+    columns = ["feature", "pearson_r", "absolute_r", "direction"]
+    if TARGET_COLUMN not in correlation.columns:
+        return pd.DataFrame(columns=columns)
+    target_correlations = pd.to_numeric(
+        correlation[TARGET_COLUMN], errors="coerce"
+    ).drop(labels=[TARGET_COLUMN], errors="ignore").dropna()
+    if target_correlations.empty:
+        return pd.DataFrame(columns=columns)
+    strongest = target_correlations.loc[
+        target_correlations.abs().sort_values(ascending=False).head(5).index
+    ]
+    return pd.DataFrame(
+        {
+            "feature": strongest.index,
+            "pearson_r": strongest.to_numpy(dtype=float),
+            "absolute_r": strongest.abs().to_numpy(dtype=float),
+            "direction": [
+                "Thuận (+)" if value >= 0 else "Nghịch (−)" for value in strongest
+            ],
+        },
+        columns=columns,
+    )
+
+
+def _plot_target_correlations(correlation: pd.DataFrame) -> pd.DataFrame:
+    """Show the five predictors most linearly associated with Diagnosis."""
+
+    ranking = _target_correlation_table(correlation)
+    if ranking.empty:
+        return ranking
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        st.bar_chart(ranking.set_index("feature"), y="pearson_r", height=280)
+        return ranking
+
+    chart_data = ranking.iloc[::-1]
+    colors = ["#B64949" if value >= 0 else "#4477AA" for value in chart_data["pearson_r"]]
+    fig, ax = plt.subplots(figsize=(7.8, 3.4), dpi=110)
+    bars = ax.barh(chart_data["feature"], chart_data["pearson_r"], color=colors)
+    ax.axvline(0, color="#334155", linewidth=0.9)
+    ax.set_xlim(-1, 1)
+    ax.set_title("Top 5 feature correlations with Diagnosis")
+    ax.set_xlabel("Pearson r  (negative ← 0 → positive)")
+    ax.set_ylabel("Feature")
+    ax.grid(axis="x", alpha=0.18)
+    for bar, value in zip(bars, chart_data["pearson_r"]):
+        offset = 0.025 if value >= 0 else -0.025
+        ax.text(
+            float(value) + offset,
+            bar.get_y() + bar.get_height() / 2,
+            f"{float(value):+.3f}",
+            va="center",
+            ha="left" if value >= 0 else "right",
+            fontsize=8,
+        )
+    fig.tight_layout()
+    _show_eda_figure(fig)
+    plt.close(fig)
+    return ranking
 
 
 def _plot_eda_boxplots(frame: pd.DataFrame) -> None:
@@ -1101,11 +1177,43 @@ def _eda_quality_tab() -> None:
             )
 
     st.markdown(f"#### {_t('Pearson correlation matrix', 'Ma trận tương quan Pearson')}")
-    correlation_columns = [column for column in ALL_FEATURES if column in frame.columns]
+    correlation_columns = [
+        column for column in ALL_FEATURES if column in analysis_frame.columns
+    ]
+    if TARGET_COLUMN in analysis_frame.columns:
+        correlation_columns.append(TARGET_COLUMN)
     if len(correlation_columns) >= 2:
-        correlation = analysis_frame[correlation_columns].apply(pd.to_numeric, errors="coerce").corr(min_periods=2).round(3)
+        correlation_frame = analysis_frame[correlation_columns].apply(
+            pd.to_numeric, errors="coerce"
+        )
+        if TARGET_COLUMN in correlation_frame.columns:
+            correlation_frame[TARGET_COLUMN] = correlation_frame[
+                TARGET_COLUMN
+            ].where(correlation_frame[TARGET_COLUMN].isin([0, 1]))
+        correlation = correlation_frame.corr(min_periods=2).round(3)
         _plot_eda_heatmap(correlation)
-        st.caption(f"Pearson correlation on n={len(analysis_frame)} V3 analysis rows after BP exclusions.")
+        st.caption(
+            f"Pearson correlation on n={len(analysis_frame)} V3 analysis rows after BP exclusions. "
+            "Blue is negative correlation, white is near zero, and red is positive correlation; "
+            "the color bar uses the fixed range −1 to +1."
+        )
+        if TARGET_COLUMN in correlation.columns:
+            st.markdown(
+                "##### "
+                + _t(
+                    "Five strongest correlations with Diagnosis",
+                    "5 đặc trưng tương quan mạnh nhất với Diagnosis",
+                )
+            )
+            target_ranking = _plot_target_correlations(correlation)
+            if target_ranking.empty:
+                st.info(
+                    "Diagnosis does not contain enough valid binary values to calculate target correlations."
+                )
+            else:
+                st.caption(
+                    "Ranked by |Pearson r|. The sign shows direction only; correlation does not prove causation."
+                )
         with st.expander("View correlation values", expanded=False):
             st.dataframe(correlation, width="stretch")
         st.download_button(
@@ -1503,18 +1611,9 @@ def _unsupervised_learning_tab() -> None:
 
 
 def _eda_tab() -> None:
-    """Keep supervised EDA evidence and unsupervised exploration separate."""
+    """Render the report-aligned EDA and data-quality evidence."""
 
-    evidence_tab, unsupervised_tab = st.tabs(
-        [
-            _t("EDA and data quality", "EDA & chất lượng dữ liệu"),
-            _t("Unsupervised learning", "Học không giám sát"),
-        ]
-    )
-    with evidence_tab:
-        _eda_quality_tab()
-    with unsupervised_tab:
-        _unsupervised_learning_tab()
+    _eda_quality_tab()
 
 
 def _batch_processing_tab(
