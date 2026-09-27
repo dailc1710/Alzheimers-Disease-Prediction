@@ -17,7 +17,7 @@ import secrets
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -28,6 +28,7 @@ PASSWORD_SCHEME = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 310_000
 ALLOWED_ROLES = {"viewer", "doctor", "admin"}
 USERNAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{3,64}$")
+LOGIN_SESSION_TTL = timedelta(hours=24)
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,18 @@ def _open_connection(database_path: str | Path | None = None) -> sqlite3.Connect
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            expires_at_utc TEXT NOT NULL,
+            last_seen_at_utc TEXT NOT NULL,
+            FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE
+        )
+        """
+    )
     connection.commit()
     return connection
 
@@ -211,6 +224,109 @@ def authenticate(
     return AuthUser(username=str(row["username"]), role=str(row["role"]))
 
 
+def _login_token_hash(token: str) -> str:
+    """Hash a bearer token before database lookup or storage."""
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_login_session(
+    user: AuthUser,
+    *,
+    database_path: str | Path | None = None,
+    ttl: timedelta = LOGIN_SESSION_TTL,
+) -> str:
+    """Create a revocable login token and store only its SHA-256 digest."""
+
+    if ttl.total_seconds() <= 0:
+        raise ValueError("Login-session lifetime must be positive.")
+    token = secrets.token_urlsafe(32)
+    token_hash = _login_token_hash(token)
+    now = datetime.now(timezone.utc)
+    expires_at = now + ttl
+    with _connect(database_path) as connection:
+        connection.execute(
+            "DELETE FROM auth_sessions WHERE expires_at_utc <= ?",
+            (now.isoformat(),),
+        )
+        connection.execute(
+            """
+            INSERT INTO auth_sessions (
+                token_hash, username, created_at_utc, expires_at_utc, last_seen_at_utc
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                token_hash,
+                user.username,
+                now.isoformat(),
+                expires_at.isoformat(),
+                now.isoformat(),
+            ),
+        )
+        connection.commit()
+    return token
+
+
+def restore_login_session(
+    token: str,
+    *,
+    database_path: str | Path | None = None,
+) -> AuthUser | None:
+    """Restore an active account from an unexpired bearer token."""
+
+    if not isinstance(token, str) or not 20 <= len(token) <= 512:
+        return None
+    token_hash = _login_token_hash(token)
+    now = datetime.now(timezone.utc)
+    with _connect(database_path) as connection:
+        row = connection.execute(
+            """
+            SELECT sessions.username, sessions.expires_at_utc, users.role
+            FROM auth_sessions AS sessions
+            JOIN users ON users.username = sessions.username
+            WHERE sessions.token_hash = ? AND users.active = 1
+            """,
+            (token_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            expires_at = datetime.fromisoformat(str(row["expires_at_utc"]))
+        except ValueError:
+            expires_at = now - timedelta(seconds=1)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= now:
+            connection.execute(
+                "DELETE FROM auth_sessions WHERE token_hash = ?", (token_hash,)
+            )
+            connection.commit()
+            return None
+        connection.execute(
+            "UPDATE auth_sessions SET last_seen_at_utc = ? WHERE token_hash = ?",
+            (now.isoformat(), token_hash),
+        )
+        connection.commit()
+    return AuthUser(username=str(row["username"]), role=str(row["role"]))
+
+
+def revoke_login_session(
+    token: str,
+    *,
+    database_path: str | Path | None = None,
+) -> None:
+    """Revoke one persistent login token during logout."""
+
+    if not isinstance(token, str) or not token:
+        return
+    with _connect(database_path) as connection:
+        connection.execute(
+            "DELETE FROM auth_sessions WHERE token_hash = ?",
+            (_login_token_hash(token),),
+        )
+        connection.commit()
+
+
 def list_users(database_path: str | Path | None = None) -> list[dict[str, str]]:
     """Return non-secret account metadata for administration."""
 
@@ -232,9 +348,12 @@ __all__ = [
     "AuthUser",
     "authenticate",
     "authentication_disabled",
+    "create_login_session",
     "create_user",
     "hash_password",
     "list_users",
+    "restore_login_session",
+    "revoke_login_session",
     "state_database_path",
     "user_count",
     "validate_password",

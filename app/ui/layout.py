@@ -23,8 +23,14 @@ def render_sidebar_brand() -> None:
     st.sidebar.markdown(
         """
         <div class="brand-lockup">
-            <div class="brand-mark">✦</div>
-            <div>
+            <div class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" role="img" focusable="false">
+                    <path d="M9.5 4.5A3 3 0 0 0 6.7 8a3.4 3.4 0 0 0-1.2 6.5A3.5 3.5 0 0 0 9 19.5h1.5V6a1.5 1.5 0 0 0-1-1.5Z" />
+                    <path d="M14.5 4.5A3 3 0 0 1 17.3 8a3.4 3.4 0 0 1 1.2 6.5 3.5 3.5 0 0 1-3.5 5h-1.5V6a1.5 1.5 0 0 1 1-1.5Z" />
+                    <path d="M6.7 8.1c1.5-.1 2.5.6 2.9 1.8M5.5 14.5c1.1-.7 2.4-.7 3.5 0M17.3 8.1c-1.5-.1-2.5.6-2.9 1.8M18.5 14.5c-1.1-.7-2.4-.7-3.5 0" />
+                </svg>
+            </div>
+            <div class="brand-copy">
                 <div class="brand-name">NeuroScreen</div>
                 <div class="brand-caption">Alzheimer research workspace</div>
             </div>

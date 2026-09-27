@@ -4,7 +4,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from auth import authenticate, create_user, hash_password, list_users, user_count, verify_password
+from auth import (
+    authenticate,
+    create_login_session,
+    create_user,
+    hash_password,
+    list_users,
+    restore_login_session,
+    revoke_login_session,
+    user_count,
+    verify_password,
+)
 from feedback_store import (
     case_counts,
     feedback_training_frame,
@@ -38,6 +48,24 @@ class AuthenticationTests(unittest.TestCase):
             self.assertEqual("doctor", authenticate("DOCTOR.ONE", "ClinicalPass123", database_path=database).role)
             self.assertIsNone(authenticate("doctor.one", "bad-password", database_path=database))
             self.assertEqual(["doctor.one"], [row["username"] for row in list_users(database)])
+
+    def test_login_session_survives_refresh_until_logout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "state.sqlite3"
+            created = create_user(
+                "Admin.One",
+                "ClinicalPass123",
+                "admin",
+                created_by="first-run-setup",
+                database_path=database,
+            )
+            token = create_login_session(created, database_path=database)
+            restored = restore_login_session(token, database_path=database)
+            self.assertEqual(created, restored)
+            self.assertNotIn(token, database.read_bytes().decode("utf-8", errors="ignore"))
+
+            revoke_login_session(token, database_path=database)
+            self.assertIsNone(restore_login_session(token, database_path=database))
 
 
 class FeedbackStoreTests(unittest.TestCase):

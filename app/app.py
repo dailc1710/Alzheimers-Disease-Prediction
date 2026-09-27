@@ -13,8 +13,11 @@ from auth import (
     AuthUser,
     authenticate,
     authentication_disabled,
+    create_login_session,
     create_user,
     list_users,
+    restore_login_session,
+    revoke_login_session,
     user_count,
 )
 from feedback_store import (
@@ -57,6 +60,7 @@ from ui import layout as layout_ui
 from ui import model_info as model_info_ui
 
 SCREENING_DISCLAIMER = data_processing_ui.SCREENING_DISCLAIMER
+LOGIN_SESSION_QUERY_KEY = "auth_session"
 _read_uploaded_csv = data_processing_ui.read_uploaded_csv
 _detect_v3_schema = data_processing_ui.detect_v3_schema
 _validate_five_feature_scoring_columns = data_processing_ui.validate_five_feature_scoring_columns
@@ -178,8 +182,26 @@ def _session_user() -> AuthUser | None:
     return AuthUser(username=username, role=role) if username and role else None
 
 
-def _set_session_user(user: AuthUser) -> None:
+def _query_login_token() -> str | None:
+    """Read the persistent login token carried across a browser refresh."""
+
+    value = st.query_params.get(LOGIN_SESSION_QUERY_KEY)
+    if isinstance(value, list):
+        value = value[-1] if value else None
+    return str(value).strip() if value else None
+
+
+def _clear_query_login_token() -> None:
+    """Remove the persistent token from the current URL."""
+
+    if LOGIN_SESSION_QUERY_KEY in st.query_params:
+        del st.query_params[LOGIN_SESSION_QUERY_KEY]
+
+
+def _set_session_user(user: AuthUser, *, persist: bool = False) -> None:
     st.session_state["auth_user"] = {"username": user.username, "role": user.role}
+    if persist:
+        st.query_params[LOGIN_SESSION_QUERY_KEY] = create_login_session(user)
 
 
 def _require_authentication() -> AuthUser:
@@ -191,6 +213,14 @@ def _require_authentication() -> AuthUser:
     current = _session_user()
     if current is not None:
         return current
+
+    login_token = _query_login_token()
+    if login_token is not None:
+        restored = restore_login_session(login_token)
+        if restored is not None:
+            _set_session_user(restored)
+            return restored
+        _clear_query_login_token()
 
     first_run = user_count() == 0
     with st.container(key="auth_page"):
@@ -229,7 +259,7 @@ def _require_authentication() -> AuthUser:
                             except ValueError as exc:
                                 st.error(str(exc))
                             else:
-                                _set_session_user(user)
+                                _set_session_user(user, persist=True)
                                 st.rerun()
                 else:
                     with st.form("login_form", border=False):
@@ -245,7 +275,7 @@ def _require_authentication() -> AuthUser:
                         if user is None:
                             st.error(_t("Incorrect username or password.", "Sai tên đăng nhập hoặc mật khẩu."))
                         else:
-                            _set_session_user(user)
+                            _set_session_user(user, persist=True)
                             st.rerun()
     st.stop()
 
@@ -257,6 +287,10 @@ def _render_account_sidebar(user: AuthUser) -> None:
     st.sidebar.caption(_t("Signed in", "Đang đăng nhập"))
     st.sidebar.markdown(f"**{user.username}** · `{user.role}`")
     if st.sidebar.button(_t("Sign out", "Đăng xuất"), key="logout_button"):
+        login_token = _query_login_token()
+        if login_token is not None:
+            revoke_login_session(login_token)
+        _clear_query_login_token()
         st.session_state.pop("auth_user", None)
         st.rerun()
 
@@ -395,7 +429,6 @@ def _single_case_manual_form(
         result_metrics[1].metric(
             _t("Alzheimer score", "Xác suất Alzheimer"),
             f"{score * 100:.1f}%",
-            _t(f"threshold {threshold:.3f}", f"ngưỡng {threshold:.3f}"),
         )
         if predicted_label:
             st.error(_t("Screening signal: higher", "Tín hiệu sàng lọc: cao"))
@@ -5103,9 +5136,6 @@ def _model_info_tab(payload: dict, metadata: dict) -> None:
             display_threshold_table = threshold_table.copy()
             display_threshold_table["Scenario"] = display_threshold_table["Scenario"].replace(
                 {
-                    "Recall-priority candidate": _t(
-                        "Recall-priority candidate", "Ứng viên ưu tiên Recall"
-                    ),
                     "Requested ≈0.20 example": _t(
                         "Requested ≈0.20 example", "Ví dụ ngưỡng ≈0,20"
                     ),
@@ -5727,7 +5757,6 @@ def main() -> None:
     _language_selector()
     user = _require_authentication()
     st.title(_t("Alzheimer's Disease Screening", "Sàng lọc bệnh Alzheimer"))
-    _render_account_sidebar(user)
     active_section = _sidebar_navigation()
     try:
         payload, metadata = get_runtime(_active_artifact_cache_key())
@@ -5742,6 +5771,7 @@ def main() -> None:
         metadata.get("selected_features", payload.get("features", SELECTED_FEATURES))
     )
     _render_sidebar_status(active_version, len(active_features), active_threshold)
+    _render_account_sidebar(user)
 
     st.markdown(
         f"""

@@ -261,16 +261,12 @@ def threshold_scenario_table(metadata: dict, selected_threshold: float) -> pd.Da
         index = (sweep["threshold"] - threshold).abs().idxmin()
         return sweep.loc[index].to_dict()
 
-    minimum_false_negatives = sweep["false_negatives"].min()
-    recall_candidates = sweep[sweep["false_negatives"].eq(minimum_false_negatives)]
-    recall_row = recall_candidates.sort_values(["false_positives", "threshold"]).iloc[0].to_dict()
     selected_metrics = metadata.get("validation_metrics", {})
     selected_row = {
         "threshold": selected_threshold,
         **{column: selected_metrics.get(column) for column in required if column != "threshold"},
     }
     scenarios = [
-        ("Recall-priority candidate", recall_row),
         ("Requested ≈0.20 example", nearest_sweep_row(0.20)),
         ("Selected by validation F2", selected_row),
         ("Default 0.50", nearest_sweep_row(0.50)),

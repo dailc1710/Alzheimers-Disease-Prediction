@@ -272,6 +272,8 @@ class AppSmokeTests(unittest.TestCase):
         _, metadata = app.load_artifacts(app.DEFAULT_ARTIFACTS_DIR)
         threshold_table = app._threshold_scenario_table(metadata, metadata["threshold"])
         self.assertEqual({"Validation (n=314)"}, set(threshold_table["Cohort"]))
+        self.assertEqual(3, len(threshold_table))
+        self.assertNotIn(0.06, threshold_table["Threshold"].tolist())
         selected = threshold_table.loc[
             threshold_table["Scenario"].eq("Selected by validation F2")
         ].iloc[0]
