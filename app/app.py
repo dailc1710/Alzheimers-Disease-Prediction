@@ -8,16 +8,14 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+import auth as auth_module
 import ml_pipeline as ml_pipeline_module
 from auth import (
     AuthUser,
     authenticate,
     authentication_disabled,
-    create_login_session,
     create_user,
     list_users,
-    restore_login_session,
-    revoke_login_session,
     user_count,
 )
 from feedback_store import (
@@ -191,6 +189,28 @@ def _query_login_token() -> str | None:
     return str(value).strip() if value else None
 
 
+def _create_login_session(user: AuthUser) -> str | None:
+    """Use persistent sessions when the deployed auth module supports them."""
+
+    helper = getattr(auth_module, "create_login_session", None)
+    return helper(user) if helper is not None else None
+
+
+def _restore_login_session(token: str) -> AuthUser | None:
+    """Restore a persistent session when available in the deployed auth module."""
+
+    helper = getattr(auth_module, "restore_login_session", None)
+    return helper(token) if helper is not None else None
+
+
+def _revoke_login_session(token: str) -> None:
+    """Revoke a persistent session when available in the deployed auth module."""
+
+    helper = getattr(auth_module, "revoke_login_session", None)
+    if helper is not None:
+        helper(token)
+
+
 def _clear_query_login_token() -> None:
     """Remove the persistent token from the current URL."""
 
@@ -201,7 +221,9 @@ def _clear_query_login_token() -> None:
 def _set_session_user(user: AuthUser, *, persist: bool = False) -> None:
     st.session_state["auth_user"] = {"username": user.username, "role": user.role}
     if persist:
-        st.query_params[LOGIN_SESSION_QUERY_KEY] = create_login_session(user)
+        token = _create_login_session(user)
+        if token:
+            st.query_params[LOGIN_SESSION_QUERY_KEY] = token
 
 
 def _require_authentication() -> AuthUser:
@@ -216,7 +238,7 @@ def _require_authentication() -> AuthUser:
 
     login_token = _query_login_token()
     if login_token is not None:
-        restored = restore_login_session(login_token)
+        restored = _restore_login_session(login_token)
         if restored is not None:
             _set_session_user(restored)
             return restored
@@ -289,7 +311,7 @@ def _render_account_sidebar(user: AuthUser) -> None:
     if st.sidebar.button(_t("Sign out", "Đăng xuất"), key="logout_button"):
         login_token = _query_login_token()
         if login_token is not None:
-            revoke_login_session(login_token)
+            _revoke_login_session(login_token)
         _clear_query_login_token()
         st.session_state.pop("auth_user", None)
         st.rerun()
